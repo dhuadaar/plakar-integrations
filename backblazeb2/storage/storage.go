@@ -33,7 +33,7 @@ type b2NativeAPI interface {
 	MakeBucket(ctx context.Context, bucketName, bucketType string) (string, error)
 	StatObject(ctx context.Context, bucketName, fileName string) (*B2FileInfo, error)
 	PutObject(ctx context.Context, bucketName, fileName string, rd io.Reader, contentType string) (int64, error)
-	GetObject(ctx context.Context, bucketName, fileName string) (io.ReadCloser, error)
+	GetObject(ctx context.Context, bucketName, fileName string, rg *storage.Range) (io.ReadCloser, error)
 	ListObjects(ctx context.Context, bucketName, prefix string) ([]B2FileInfo, error)
 	RemoveObject(ctx context.Context, bucketName, fileName string) error
 }
@@ -174,7 +174,7 @@ func (s *NativeStore) Open(ctx context.Context) ([]byte, error) {
 
 	// GetObject returns a stream; defer ensures it is always closed on return,
 	// preventing HTTP body leaks and allowing connection reuse.
-	object, err := s.client.GetObject(ctx, s.bucket, s.realpath("CONFIG"))
+	object, err := s.client.GetObject(ctx, s.bucket, s.realpath("CONFIG"), nil)
 	if err != nil {
 		// Normalize "CONFIG doesn't exist yet" to the standard fs.ErrNotExist
 		// sentinel, matching the S3-compatible module's Open() behavior, so
@@ -302,37 +302,13 @@ func (s *NativeStore) Get(ctx context.Context, res storage.StorageResource, mac 
 		return nil, errors.ErrUnsupported
 	}
 
-	object, err := s.client.GetObject(ctx, s.bucket, key)
+	object, err := s.client.GetObject(ctx, s.bucket, key, rg)
 	if err != nil {
 		return nil, fmt.Errorf("get %s object: %w", res, err)
 	}
 
-	if rg == nil {
-		return object, nil
-	}
+	return object, nil
 
-	data, err := io.ReadAll(object)
-	_ = object.Close()
-	if err != nil {
-		return nil, fmt.Errorf("get %s object: %w", res, err)
-	}
-
-	start := int(rg.Offset)
-	if start < 0 {
-		start = 0
-	}
-	if start > len(data) {
-		start = len(data)
-	}
-	end := start + int(rg.Length)
-	if end > len(data) {
-		end = len(data)
-	}
-	if end < start {
-		end = start
-	}
-
-	return io.NopCloser(bytes.NewReader(data[start:end])), nil
 }
 
 // Delete removes one object by resource + MAC.

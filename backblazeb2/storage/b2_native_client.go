@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/Backblaze/blazer/b2"
+	"github.com/PlakarKorp/kloset/connectors/storage"
 )
 
 // ErrB2FileNotFound normalizes "not found" outcomes across the connector.
@@ -30,6 +31,8 @@ type b2Facade interface {
 	ObjectAttrs(ctx context.Context, bucketName, fileName string) (*b2.Attrs, error)
 	ObjectUpload(ctx context.Context, bucketName, fileName string, rd io.Reader, contentType string) (int64, error)
 	ObjectDownload(ctx context.Context, bucketName, fileName string) (io.ReadCloser, error)
+	ObjectRangeDownload(ctx context.Context, bucketName, fileName string, offset int64, length int64) (io.ReadCloser, error)
+
 	ObjectDelete(ctx context.Context, bucketName, fileName string) error
 	ListPrefix(ctx context.Context, bucketName, prefix string) ([]*b2.Attrs, error)
 }
@@ -169,7 +172,7 @@ func (c *B2NativeClient) PutObject(ctx context.Context, bucketName, fileName str
 	return f.ObjectUpload(ctx, bucketName, fileName, rd, contentType)
 }
 
-func (c *B2NativeClient) GetObject(ctx context.Context, bucketName, fileName string) (io.ReadCloser, error) {
+func (c *B2NativeClient) GetObject(ctx context.Context, bucketName, fileName string, rg *storage.Range) (io.ReadCloser, error) {
 	f, err := c.ensureFacade(ctx)
 	if err != nil {
 		return nil, err
@@ -179,6 +182,9 @@ func (c *B2NativeClient) GetObject(ctx context.Context, bucketName, fileName str
 			return nil, ErrB2FileNotFound
 		}
 		return nil, err
+	}
+	if rg != nil {
+		return f.ObjectRangeDownload(ctx, bucketName, fileName, int64(rg.Offset), int64(rg.Length))
 	}
 	return f.ObjectDownload(ctx, bucketName, fileName)
 }
@@ -331,6 +337,15 @@ func (f *blazerFacade) ObjectDownload(ctx context.Context, bucketName, fileName 
 		return nil, err
 	}
 	return bucket.Object(fileName).NewReader(ctx), nil
+}
+
+func (f *blazerFacade) ObjectRangeDownload(ctx context.Context, bucketName, fileName string, offset int64, length int64) (io.ReadCloser, error) {
+	bucket, err := f.bucket(ctx, bucketName)
+	if err != nil {
+		return nil, err
+	}
+	// return bucket.Object(fileName).NewReader(ctx), nil
+	return bucket.Object(fileName).NewRangeReader(ctx, offset, length), nil
 }
 
 func (f *blazerFacade) ObjectDelete(ctx context.Context, bucketName, fileName string) error {

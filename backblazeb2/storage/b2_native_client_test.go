@@ -8,8 +8,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"bytes"
 
 	"github.com/Backblaze/blazer/b2"
+	connectorstorage "github.com/PlakarKorp/kloset/connectors/storage"
 )
 
 var errNotFound = errors.New("not found")
@@ -18,6 +20,10 @@ type mockFacade struct {
 	buckets          map[string]map[string]*mockObject
 	newBucketInvoked bool
 	newBucketType    string
+	downloadInvoked      bool
+	rangeDownloadInvoked bool
+	lastRangeOffset      int64
+	lastRangeLength      int64
 }
 
 type mockObject struct {
@@ -83,11 +89,37 @@ func (m *mockFacade) ObjectUpload(ctx context.Context, bucketName, fileName stri
 }
 
 func (m *mockFacade) ObjectDownload(ctx context.Context, bucketName, fileName string) (io.ReadCloser, error) {
+	m.downloadInvoked = true
 	o := m.ensureObject(bucketName, fileName)
 	if o.readErr != nil {
 		return nil, o.readErr
 	}
 	return io.NopCloser(strings.NewReader(string(o.data))), nil
+}
+
+func (m *mockFacade) ObjectRangeDownload(ctx context.Context, bucketName, fileName string, offset int64, length int64) (io.ReadCloser, error) {
+	m.rangeDownloadInvoked = true
+	m.lastRangeOffset = offset
+	m.lastRangeLength = length
+	o := m.ensureObject(bucketName, fileName)
+	if o.readErr != nil {
+		return nil, o.readErr
+	}
+
+	if offset < 0 || length < 0 {
+        return nil, fmt.Errorf("invalid range: offset=%d length=%d", offset, length)
+    }
+
+	if offset >= int64(len(o.data)) {
+        return io.NopCloser(bytes.NewReader(nil)), nil
+    }
+
+    end := offset + length
+    if end > int64(len(o.data)) {
+        end = int64(len(o.data))
+    }
+
+	return io.NopCloser(strings.NewReader(string(o.data[offset:end]))), nil
 }
 
 func (m *mockFacade) ObjectDelete(ctx context.Context, bucketName, fileName string) error {
@@ -177,7 +209,7 @@ func TestB2NativeClient_MakeBucketAndObjectFlow(t *testing.T) {
 		t.Fatalf("StatObject() unexpected info: %#v", info)
 	}
 
-	rc, err := c.GetObject(context.Background(), "repo", "locks/a")
+	rc, err := c.GetObject(context.Background(), "repo", "locks/a", nil)
 	if err != nil {
 		t.Fatalf("GetObject() unexpected error: %v", err)
 	}
@@ -216,11 +248,55 @@ func TestB2NativeClient_NotFoundMapping(t *testing.T) {
 	if _, err := c.StatObject(context.Background(), "repo", "missing"); !errors.Is(err, ErrB2FileNotFound) {
 		t.Fatalf("StatObject missing: got %v, want %v", err, ErrB2FileNotFound)
 	}
-	if _, err := c.GetObject(context.Background(), "repo", "missing"); !errors.Is(err, ErrB2FileNotFound) {
+	if _, err := c.GetObject(context.Background(), "repo", "missing", nil); !errors.Is(err, ErrB2FileNotFound) {
 		t.Fatalf("GetObject missing: got %v, want %v", err, ErrB2FileNotFound)
 	}
 	if err := c.RemoveObject(context.Background(), "repo", "missing"); !errors.Is(err, ErrB2FileNotFound) {
 		t.Fatalf("RemoveObject missing: got %v, want %v", err, ErrB2FileNotFound)
+	}
+}
+
+func TestB2NativeClient_GetObject_WithRange(t *testing.T) {
+	t.Parallel()
+
+	mf := &mockFacade{buckets: map[string]map[string]*mockObject{
+		"repo": {
+			"locks/a": {
+				name:      "locks/a",
+				data:      []byte("0123456789"),
+				status:    b2.Uploaded,
+				attrsErr:  nil,
+				readErr:   nil,
+				deleteErr: nil,
+			},
+		},
+	}}
+
+	c := NewB2NativeClient("id", "key", B2ClientOptions{
+		FacadeFactory: func(ctx context.Context, keyID, appKey string) (b2Facade, error) {
+			return mf, nil
+		},
+		IsNotExist: func(err error) bool { return errors.Is(err, errNotFound) },
+	})
+
+	rc, err := c.GetObject(context.Background(), "repo", "locks/a", &connectorstorage.Range{Offset: 2, Length: 4})
+	if err != nil {
+		t.Fatalf("GetObject(range) unexpected error: %v", err)
+	}
+	defer rc.Close()
+
+	data, _ := io.ReadAll(rc)
+	if string(data) != "2345" {
+		t.Fatalf("GetObject(range) data: got %q, want %q", string(data), "2345")
+	}
+	if !mf.rangeDownloadInvoked {
+		t.Fatalf("expected ObjectRangeDownload to be invoked")
+	}
+	if mf.lastRangeOffset != 2 || mf.lastRangeLength != 4 {
+		t.Fatalf("range args mismatch: got offset=%d length=%d, want offset=2 length=4", mf.lastRangeOffset, mf.lastRangeLength)
+	}
+	if mf.downloadInvoked {
+		t.Fatalf("expected full ObjectDownload not to be invoked for range request")
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PlakarKorp/kloset/connectors/storage"
 	connectorstorage "github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
@@ -19,7 +20,7 @@ type mockB2NativeClient struct {
 	makeBucketFn   func(ctx context.Context, bucketName, bucketType string) (string, error)
 	statObjectFn   func(ctx context.Context, bucketName, fileName string) (*B2FileInfo, error)
 	putObjectFn    func(ctx context.Context, bucketName, fileName string, rd io.Reader, contentType string) (int64, error)
-	getObjectFn    func(ctx context.Context, bucketName, fileName string) (io.ReadCloser, error)
+	getObjectFn    func(ctx context.Context, bucketName, fileName string, rg *storage.Range) (io.ReadCloser, error)
 	listObjectsFn  func(ctx context.Context, bucketName, prefix string) ([]B2FileInfo, error)
 	removeObjectFn func(ctx context.Context, bucketName, fileName string) error
 }
@@ -52,9 +53,9 @@ func (m *mockB2NativeClient) PutObject(ctx context.Context, bucketName, fileName
 	return 0, nil
 }
 
-func (m *mockB2NativeClient) GetObject(ctx context.Context, bucketName, fileName string) (io.ReadCloser, error) {
+func (m *mockB2NativeClient) GetObject(ctx context.Context, bucketName, fileName string, rg *storage.Range) (io.ReadCloser, error) {
 	if m.getObjectFn != nil {
-		return m.getObjectFn(ctx, bucketName, fileName)
+		return m.getObjectFn(ctx, bucketName, fileName, rg)
 	}
 	return io.NopCloser(strings.NewReader("")), nil
 }
@@ -239,7 +240,7 @@ func TestNativeOpenAndPing(t *testing.T) {
 		stream := &closeReadCloser{reader: strings.NewReader("config-data")}
 		m := &mockB2NativeClient{
 			bucketExistsFn: func(ctx context.Context, bucketName string) (bool, error) { return true, nil },
-			getObjectFn: func(ctx context.Context, bucketName, fileName string) (io.ReadCloser, error) {
+			getObjectFn: func(ctx context.Context, bucketName, fileName string, rg *storage.Range) (io.ReadCloser, error) {
 				if fileName != "repo/CONFIG" {
 					t.Fatalf("Get key: got %q, want %q", fileName, "repo/CONFIG")
 				}
@@ -262,7 +263,7 @@ func TestNativeOpenAndPing(t *testing.T) {
 	t.Run("open missing config maps to fs.ErrNotExist", func(t *testing.T) {
 		m := &mockB2NativeClient{
 			bucketExistsFn: func(ctx context.Context, bucketName string) (bool, error) { return true, nil },
-			getObjectFn: func(ctx context.Context, bucketName, fileName string) (io.ReadCloser, error) {
+			getObjectFn: func(ctx context.Context, bucketName, fileName string, rg *storage.Range) (io.ReadCloser, error) {
 				return nil, ErrB2FileNotFound
 			},
 		}
@@ -315,7 +316,7 @@ func TestNativeListPutGetDelete(t *testing.T) {
 				stored, _ = io.ReadAll(rd)
 				return int64(len(stored)), nil
 			},
-			getObjectFn: func(ctx context.Context, bucketName, fileName string) (io.ReadCloser, error) {
+			getObjectFn: func(ctx context.Context, bucketName, fileName string, rg *storage.Range) (io.ReadCloser, error) {
 				if fileName != fmt.Sprintf("repo/locks/%016x", mac) {
 					t.Fatalf("get key mismatch: %q", fileName)
 				}
@@ -353,8 +354,14 @@ func TestNativeListPutGetDelete(t *testing.T) {
 	t.Run("get range", func(t *testing.T) {
 		mac := nativeTestMAC(0x30)
 		m := &mockB2NativeClient{
-			getObjectFn: func(ctx context.Context, bucketName, fileName string) (io.ReadCloser, error) {
-				return io.NopCloser(strings.NewReader("abcdefghij")), nil
+			getObjectFn: func(ctx context.Context, bucketName, fileName string, rg *storage.Range) (io.ReadCloser, error) {
+				if rg == nil {
+					t.Fatalf("expected non-nil range")
+				}
+				if rg.Offset != 2 || rg.Length != 4 {
+					t.Fatalf("range mismatch: got offset=%d length=%d, want offset=2 length=4", rg.Offset, rg.Length)
+				}
+				return io.NopCloser(strings.NewReader("cdef")), nil
 			},
 		}
 		s := &NativeStore{client: m, bucket: "mybucket", prefixDir: "/repo/"}
