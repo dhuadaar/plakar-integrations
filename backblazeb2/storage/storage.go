@@ -38,6 +38,19 @@ type b2NativeAPI interface {
 	RemoveObject(ctx context.Context, bucketName, fileName string) error
 }
 
+// init registers this connector's constructor with Kloset's in-process
+// storage backend registry (storage.New/storage.Open), matching the pattern
+// used by every other storage connector in this repo (e.g. backblaze_s3,
+// and the upstream s3/azblob integrations). The out-of-process plugin
+// entrypoint (plugin/storage/main.go) invokes NewNativeStore directly and
+// does not depend on this registration, but registering here keeps this
+// package usable if it's ever imported directly (embedded/in-process build,
+// or a future in-process test harness) instead of only via the plugin
+// subprocess.
+func init() {
+	storage.Register("b2", 0, NewNativeStore)
+}
+
 // NativeStore keeps all state needed by the native connector across calls.
 //
 //   - `client` performs actual B2 API operations.

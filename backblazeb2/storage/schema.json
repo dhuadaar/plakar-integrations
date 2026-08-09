@@ -12,8 +12,8 @@
     "location": {
       "type": "string",
       "minLength": 1,
-      "description": "B2 location URI: b2://<endpoint>/<bucket>/<optional-prefix>, e.g. b2://s3.us-west-004.backblazeb2.com/mybucket",
-      "pattern": "^b2://[^/]+/[^/]+(/.*)?$"
+      "description": "B2 location URI. Native (preferred): b2://<bucket>/<optional-prefix>, e.g. b2://mybucket/myprefix or b2://mybucket. Legacy/compatible: b2://<endpoint>/<bucket>/<optional-prefix>, e.g. b2://s3.us-west-004.backblazeb2.com/mybucket",
+      "pattern": "^b2://[^/]+(/[^/]*)*$"
     },
     "access_key": {
       "type": "string",
@@ -24,11 +24,6 @@
       "type": "string",
       "minLength": 1,
       "description": "B2 application key"
-    },
-    "sse_customer_key": {
-      "type": "string",
-      "minLength": 1,
-      "description": "Base64-encoded 256-bit (32-byte) customer-provided AES-256 key for SSE-C server-side encryption"
     }
   }
 }
