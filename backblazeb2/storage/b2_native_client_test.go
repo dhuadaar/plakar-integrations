@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"bytes"
 
 	"github.com/Backblaze/blazer/b2"
 	connectorstorage "github.com/PlakarKorp/kloset/connectors/storage"
@@ -17,9 +17,9 @@ import (
 var errNotFound = errors.New("not found")
 
 type mockFacade struct {
-	buckets          map[string]map[string]*mockObject
-	newBucketInvoked bool
-	newBucketType    string
+	buckets              map[string]map[string]*mockObject
+	newBucketInvoked     bool
+	newBucketType        string
 	downloadInvoked      bool
 	rangeDownloadInvoked bool
 	lastRangeOffset      int64
@@ -107,17 +107,17 @@ func (m *mockFacade) ObjectRangeDownload(ctx context.Context, bucketName, fileNa
 	}
 
 	if offset < 0 || length < 0 {
-        return nil, fmt.Errorf("invalid range: offset=%d length=%d", offset, length)
-    }
+		return nil, fmt.Errorf("invalid range: offset=%d length=%d", offset, length)
+	}
 
 	if offset >= int64(len(o.data)) {
-        return io.NopCloser(bytes.NewReader(nil)), nil
-    }
+		return io.NopCloser(bytes.NewReader(nil)), nil
+	}
 
-    end := offset + length
-    if end > int64(len(o.data)) {
-        end = int64(len(o.data))
-    }
+	end := offset + length
+	if end > int64(len(o.data)) {
+		end = int64(len(o.data))
+	}
 
 	return io.NopCloser(strings.NewReader(string(o.data[offset:end]))), nil
 }
