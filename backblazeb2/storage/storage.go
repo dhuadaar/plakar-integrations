@@ -285,10 +285,6 @@ func (s *NativeStore) Put(ctx context.Context, res storage.StorageResource, mac 
 }
 
 // Get fetches a single object by resource + MAC.
-//
-// Native B2 download API in this implementation returns a stream for the
-// whole object. For ranged reads, we currently read the full payload and slice
-// the requested segment locally.
 func (s *NativeStore) Get(ctx context.Context, res storage.StorageResource, mac objects.MAC, rg *storage.Range) (io.ReadCloser, error) {
 	var key string
 	switch res {
