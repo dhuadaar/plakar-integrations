@@ -80,15 +80,18 @@ func NewNativeStore(ctx context.Context, proto string, storeConfig map[string]st
 
 	accessKey, ok := storeConfig["access_key"]
 	if !ok {
+		debugf("NewNativeStore: missing access_key")
 		return nil, fmt.Errorf("missing access_key")
 	}
 	secretAccessKey, ok := storeConfig["secret_access_key"]
 	if !ok {
+		debugf("NewNativeStore: missing secret_access_key")
 		return nil, fmt.Errorf("missing secret_access_key")
 	}
 
 	u, err := url.Parse(storeConfig["location"])
 	if err != nil {
+		debugf("NewNativeStore: parse location failed: %v", err)
 		return nil, fmt.Errorf("parse location: %w", err)
 	}
 
@@ -106,6 +109,7 @@ func NewNativeStore(ctx context.Context, proto string, storeConfig map[string]st
 	}
 
 	if bucket == "" {
+		debugf("NewNativeStore: parsed empty bucket from location=%q host=%q path=%q", storeConfig["location"], host, trimmedPath)
 		return nil, fmt.Errorf("failed to parse the location: bucket name is empty")
 	}
 
@@ -117,6 +121,7 @@ func NewNativeStore(ctx context.Context, proto string, storeConfig map[string]st
 	}
 
 	client := NewB2NativeClient(accessKey, secretAccessKey, B2ClientOptions{})
+	debugf("NativeStore initialized bucket=%q prefix=%q host=%q", bucket, prefixDir, host)
 
 	return &NativeStore{
 		client:    client,
@@ -137,12 +142,15 @@ func (s *NativeStore) realpath(path string) string {
 // - fail if CONFIG already exists at this prefix,
 // - otherwise write CONFIG.
 func (s *NativeStore) Create(ctx context.Context, config []byte) error {
+	debugf("Create: start bucket=%q key=%q", s.bucket, s.realpath("CONFIG"))
 	exists, err := s.client.BucketExists(ctx, s.bucket)
 	if err != nil {
+		debugf("Create: bucket exists check failed bucket=%q err=%v", s.bucket, err)
 		return fmt.Errorf("check if bucket exists: %w", err)
 	}
 	if !exists {
 		if _, err := s.client.MakeBucket(ctx, s.bucket, "allPrivate"); err != nil {
+			debugf("Create: make bucket failed bucket=%q err=%v", s.bucket, err)
 			return fmt.Errorf("make bucket: %w", err)
 		}
 	}
@@ -150,25 +158,31 @@ func (s *NativeStore) Create(ctx context.Context, config []byte) error {
 	_, err = s.client.StatObject(ctx, s.bucket, s.realpath("CONFIG"))
 	if err != nil {
 		if !errors.Is(err, ErrB2FileNotFound) {
+			debugf("Create: stat CONFIG failed bucket=%q key=%q err=%v", s.bucket, s.realpath("CONFIG"), err)
 			return fmt.Errorf("stat object CONFIG: %w", err)
 		}
 	} else {
+		debugf("Create: repository already initialized bucket=%q key=%q", s.bucket, s.realpath("CONFIG"))
 		return fmt.Errorf("bucket already initialized")
 	}
 
 	_, err = s.client.PutObject(ctx, s.bucket, s.realpath("CONFIG"), bytes.NewReader(config), "application/octet-stream")
 	if err != nil {
+		debugf("Create: put CONFIG failed bucket=%q key=%q err=%v", s.bucket, s.realpath("CONFIG"), err)
 		return fmt.Errorf("put object CONFIG: %w", err)
 	}
 	return nil
 }
 
 func (s *NativeStore) Open(ctx context.Context) ([]byte, error) {
+	debugf("Open: start bucket=%q key=%q", s.bucket, s.realpath("CONFIG"))
 	exists, err := s.client.BucketExists(ctx, s.bucket)
 	if err != nil {
+		debugf("Open: bucket exists check failed bucket=%q err=%v", s.bucket, err)
 		return nil, fmt.Errorf("error checking if bucket exists: %w", err)
 	}
 	if !exists {
+		debugf("Open: bucket does not exist bucket=%q", s.bucket)
 		return nil, fmt.Errorf("bucket does not exist")
 	}
 
@@ -181,14 +195,17 @@ func (s *NativeStore) Open(ctx context.Context) ([]byte, error) {
 		// callers can use errors.Is(err, fs.ErrNotExist) regardless of which
 		// connector backs the repository.
 		if errors.Is(err, ErrB2FileNotFound) {
+			debugf("Open: CONFIG missing bucket=%q key=%q", s.bucket, s.realpath("CONFIG"))
 			return nil, fs.ErrNotExist
 		}
+		debugf("Open: get CONFIG failed bucket=%q key=%q err=%v", s.bucket, s.realpath("CONFIG"), err)
 		return nil, fmt.Errorf("error getting object: %w", err)
 	}
 	defer object.Close()
 
 	data, err := io.ReadAll(object)
 	if err != nil {
+		debugf("Open: read CONFIG failed bucket=%q key=%q err=%v", s.bucket, s.realpath("CONFIG"), err)
 		return nil, fmt.Errorf("error reading object: %w", err)
 	}
 
@@ -197,11 +214,14 @@ func (s *NativeStore) Open(ctx context.Context) ([]byte, error) {
 
 // Ping checks reachability and bucket existence without reading CONFIG.
 func (s *NativeStore) Ping(ctx context.Context) error {
+	debugf("Ping: start bucket=%q", s.bucket)
 	ok, err := s.client.BucketExists(ctx, s.bucket)
 	if err != nil {
+		debugf("Ping: bucket exists check failed bucket=%q err=%v", s.bucket, err)
 		return err
 	}
 	if !ok {
+		debugf("Ping: bucket does not exist bucket=%q", s.bucket)
 		return fmt.Errorf("bucket does not exist")
 	}
 	return nil
@@ -241,9 +261,11 @@ func (s *NativeStore) List(ctx context.Context, res storage.StorageResource) ([]
 	default:
 		return nil, errors.ErrUnsupported
 	}
+	debugf("List: start bucket=%q prefix=%q res=%s", s.bucket, prefix, res)
 
 	files, err := s.client.ListObjects(ctx, s.bucket, prefix)
 	if err != nil {
+		debugf("List: list objects failed bucket=%q prefix=%q res=%s err=%v", s.bucket, prefix, res, err)
 		return nil, fmt.Errorf("list %s objects: %w", res, err)
 	}
 
@@ -252,6 +274,7 @@ func (s *NativeStore) List(ctx context.Context, res storage.StorageResource) ([]
 		if strings.HasPrefix(object.FileName, prefix) && len(object.FileName) >= prefixSize {
 			t, err := hex.DecodeString(object.FileName[prefixSize:])
 			if err != nil {
+				debugf("List: decode key failed res=%s key=%q err=%v", res, object.FileName, err)
 				return nil, fmt.Errorf("decode %s key: %w", res, err)
 			}
 			if len(t) != 32 {
@@ -276,9 +299,11 @@ func (s *NativeStore) Put(ctx context.Context, res storage.StorageResource, mac 
 	} else {
 		return -1, errors.ErrUnsupported
 	}
+	debugf("Put: start bucket=%q key=%q res=%s", s.bucket, key, res)
 
 	size, err := s.client.PutObject(ctx, s.bucket, key, rd, "application/octet-stream")
 	if err != nil {
+		debugf("Put: put object failed bucket=%q key=%q res=%s err=%v", s.bucket, key, res, err)
 		return 0, fmt.Errorf("put %s object: %w", res, err)
 	}
 	return size, nil
@@ -297,9 +322,15 @@ func (s *NativeStore) Get(ctx context.Context, res storage.StorageResource, mac 
 	default:
 		return nil, errors.ErrUnsupported
 	}
+	if rg != nil {
+		debugf("Get: start bucket=%q key=%q res=%s range_offset=%d range_length=%d", s.bucket, key, res, rg.Offset, rg.Length)
+	} else {
+		debugf("Get: start bucket=%q key=%q res=%s", s.bucket, key, res)
+	}
 
 	object, err := s.client.GetObject(ctx, s.bucket, key, rg)
 	if err != nil {
+		debugf("Get: get object failed bucket=%q key=%q res=%s err=%v", s.bucket, key, res, err)
 		return nil, fmt.Errorf("get %s object: %w", res, err)
 	}
 
@@ -320,8 +351,10 @@ func (s *NativeStore) Delete(ctx context.Context, res storage.StorageResource, m
 	default:
 		return errors.ErrUnsupported
 	}
+	debugf("Delete: start bucket=%q key=%q res=%s", s.bucket, key, res)
 
 	if err := s.client.RemoveObject(ctx, s.bucket, key); err != nil {
+		debugf("Delete: remove object failed bucket=%q key=%q res=%s err=%v", s.bucket, key, res, err)
 		return fmt.Errorf("remove %s object: %w", res, err)
 	}
 	return nil
@@ -330,5 +363,6 @@ func (s *NativeStore) Delete(ctx context.Context, res storage.StorageResource, m
 // Close releases connector resources. NativeStore has no persistent handles,
 // so this is currently a no-op.
 func (s *NativeStore) Close(ctx context.Context) error {
+	debugf("Close: start bucket=%q", s.bucket)
 	return nil
 }

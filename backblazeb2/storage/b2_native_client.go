@@ -98,6 +98,7 @@ func (c *B2NativeClient) ensureFacade(ctx context.Context) (b2Facade, error) {
 	}
 	f, err := c.factory(ctx, c.keyID, c.appKey)
 	if err != nil {
+		debugf("ensureFacade: authorize account failed err=%v", err)
 		return nil, fmt.Errorf("authorize account: %w", err)
 	}
 	c.facade = f
@@ -120,13 +121,16 @@ func mapObjectState(st b2.ObjectState) string {
 func (c *B2NativeClient) BucketExists(ctx context.Context, bucketName string) (bool, error) {
 	f, err := c.ensureFacade(ctx)
 	if err != nil {
+		debugf("BucketExists: ensure facade failed bucket=%q err=%v", bucketName, err)
 		return false, err
 	}
 	ok, err := f.BucketExists(ctx, bucketName)
 	if err != nil {
 		if c.isNotExist(err) {
+			debugf("BucketExists: bucket not found bucket=%q", bucketName)
 			return false, nil
 		}
+		debugf("BucketExists: backend error bucket=%q err=%v", bucketName, err)
 		return false, err
 	}
 	return ok, nil
@@ -138,22 +142,31 @@ func (c *B2NativeClient) MakeBucket(ctx context.Context, bucketName, bucketType 
 	}
 	f, err := c.ensureFacade(ctx)
 	if err != nil {
+		debugf("MakeBucket: ensure facade failed bucket=%q err=%v", bucketName, err)
 		return "", err
 	}
-	return f.MakeBucket(ctx, bucketName, bucketType)
+	id, err := f.MakeBucket(ctx, bucketName, bucketType)
+	if err != nil {
+		debugf("MakeBucket: backend create failed bucket=%q type=%q err=%v", bucketName, bucketType, err)
+		return "", err
+	}
+	return id, nil
 }
 
 func (c *B2NativeClient) StatObject(ctx context.Context, bucketName, fileName string) (*B2FileInfo, error) {
 	f, err := c.ensureFacade(ctx)
 	if err != nil {
+		debugf("StatObject: ensure facade failed bucket=%q key=%q err=%v", bucketName, fileName, err)
 		return nil, err
 	}
 
 	attrs, err := f.ObjectAttrs(ctx, bucketName, fileName)
 	if err != nil {
 		if c.isNotExist(err) {
+			debugf("StatObject: not found bucket=%q key=%q", bucketName, fileName)
 			return nil, ErrB2FileNotFound
 		}
+		debugf("StatObject: backend error bucket=%q key=%q err=%v", bucketName, fileName, err)
 		return nil, err
 	}
 
@@ -167,36 +180,57 @@ func (c *B2NativeClient) StatObject(ctx context.Context, bucketName, fileName st
 func (c *B2NativeClient) PutObject(ctx context.Context, bucketName, fileName string, rd io.Reader, contentType string) (int64, error) {
 	f, err := c.ensureFacade(ctx)
 	if err != nil {
+		debugf("PutObject: ensure facade failed bucket=%q key=%q err=%v", bucketName, fileName, err)
 		return 0, err
 	}
-	return f.ObjectUpload(ctx, bucketName, fileName, rd, contentType)
+	n, err := f.ObjectUpload(ctx, bucketName, fileName, rd, contentType)
+	if err != nil {
+		debugf("PutObject: upload failed bucket=%q key=%q err=%v", bucketName, fileName, err)
+		return 0, err
+	}
+	return n, nil
 }
 
 func (c *B2NativeClient) GetObject(ctx context.Context, bucketName, fileName string, rg *storage.Range) (io.ReadCloser, error) {
 	f, err := c.ensureFacade(ctx)
 	if err != nil {
+		debugf("GetObject: ensure facade failed bucket=%q key=%q err=%v", bucketName, fileName, err)
 		return nil, err
 	}
 	if _, err := f.ObjectAttrs(ctx, bucketName, fileName); err != nil {
 		if c.isNotExist(err) {
+			debugf("GetObject: not found bucket=%q key=%q", bucketName, fileName)
 			return nil, ErrB2FileNotFound
 		}
+		debugf("GetObject: attrs failed bucket=%q key=%q err=%v", bucketName, fileName, err)
 		return nil, err
 	}
 	if rg != nil {
-		return f.ObjectRangeDownload(ctx, bucketName, fileName, int64(rg.Offset), int64(rg.Length))
+		rc, err := f.ObjectRangeDownload(ctx, bucketName, fileName, int64(rg.Offset), int64(rg.Length))
+		if err != nil {
+			debugf("GetObject: range download failed bucket=%q key=%q offset=%d length=%d err=%v", bucketName, fileName, rg.Offset, rg.Length, err)
+			return nil, err
+		}
+		return rc, nil
 	}
-	return f.ObjectDownload(ctx, bucketName, fileName)
+	rc, err := f.ObjectDownload(ctx, bucketName, fileName)
+	if err != nil {
+		debugf("GetObject: download failed bucket=%q key=%q err=%v", bucketName, fileName, err)
+		return nil, err
+	}
+	return rc, nil
 }
 
 func (c *B2NativeClient) ListObjects(ctx context.Context, bucketName, prefix string) ([]B2FileInfo, error) {
 	f, err := c.ensureFacade(ctx)
 	if err != nil {
+		debugf("ListObjects: ensure facade failed bucket=%q prefix=%q err=%v", bucketName, prefix, err)
 		return nil, err
 	}
 
 	attrsList, err := f.ListPrefix(ctx, bucketName, prefix)
 	if err != nil {
+		debugf("ListObjects: list prefix failed bucket=%q prefix=%q err=%v", bucketName, prefix, err)
 		return nil, err
 	}
 
@@ -223,12 +257,15 @@ func (c *B2NativeClient) ListObjects(ctx context.Context, bucketName, prefix str
 func (c *B2NativeClient) RemoveObject(ctx context.Context, bucketName, fileName string) error {
 	f, err := c.ensureFacade(ctx)
 	if err != nil {
+		debugf("RemoveObject: ensure facade failed bucket=%q key=%q err=%v", bucketName, fileName, err)
 		return err
 	}
 	if err := f.ObjectDelete(ctx, bucketName, fileName); err != nil {
 		if c.isNotExist(err) {
+			debugf("RemoveObject: not found bucket=%q key=%q", bucketName, fileName)
 			return ErrB2FileNotFound
 		}
+		debugf("RemoveObject: delete failed bucket=%q key=%q err=%v", bucketName, fileName, err)
 		return err
 	}
 	return nil
