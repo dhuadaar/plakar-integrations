@@ -362,17 +362,16 @@ func (f *blazerFacade) ListPrefix(ctx context.Context, bucketName, prefix string
 		return nil, err
 	}
 
-	iter := bucket.List(ctx, b2.ListPrefix(prefix), b2.ListHidden())
+	// Do not call Object.Attrs() per entry; it may trigger extra metadata fetches.
+	// list_file_names already gives us current (non-hidden) objects by prefix.
+	iter := bucket.List(ctx, b2.ListPrefix(prefix))
 	out := make([]*b2.Attrs, 0)
 	for iter.Next() {
-		attrs, err := iter.Object().Attrs(ctx)
-		if err != nil {
-			if b2.IsNotExist(err) {
-				continue
-			}
-			return nil, err
-		}
-		out = append(out, attrs)
+		obj := iter.Object()
+		out = append(out, &b2.Attrs{
+			Name:   obj.Name(),
+			Status: b2.Uploaded,
+		})
 	}
 	if err := iter.Err(); err != nil {
 		return nil, err
