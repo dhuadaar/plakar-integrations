@@ -145,6 +145,9 @@ func (m *mockFacade) ListPrefix(ctx context.Context, bucketName, prefix string) 
 	return attrs, nil
 }
 
+// TestB2NativeClient_UsesFactoryOnceAndBucketExists verifies lazy facade
+// initialization is reused and bucket existence checks map missing bucket to
+// (false, nil).
 func TestB2NativeClient_UsesFactoryOnceAndBucketExists(t *testing.T) {
 	t.Parallel()
 
@@ -174,6 +177,8 @@ func TestB2NativeClient_UsesFactoryOnceAndBucketExists(t *testing.T) {
 	}
 }
 
+// TestB2NativeClient_MakeBucketAndObjectFlow validates the happy-path flow for
+// make bucket, put, stat, get, list, and remove operations.
 func TestB2NativeClient_MakeBucketAndObjectFlow(t *testing.T) {
 	t.Parallel()
 
@@ -232,6 +237,8 @@ func TestB2NativeClient_MakeBucketAndObjectFlow(t *testing.T) {
 	}
 }
 
+// TestB2NativeClient_NotFoundMapping ensures backend not-found errors are
+// normalized to ErrB2FileNotFound for stat/get/remove.
 func TestB2NativeClient_NotFoundMapping(t *testing.T) {
 	t.Parallel()
 
@@ -256,6 +263,8 @@ func TestB2NativeClient_NotFoundMapping(t *testing.T) {
 	}
 }
 
+// TestB2NativeClient_GetObject_WithRange verifies range requests are forwarded
+// to ObjectRangeDownload with correct offsets/length and without full download.
 func TestB2NativeClient_GetObject_WithRange(t *testing.T) {
 	t.Parallel()
 
@@ -300,6 +309,8 @@ func TestB2NativeClient_GetObject_WithRange(t *testing.T) {
 	}
 }
 
+// TestMapObjectState checks conversion from blazer object states to B2 action
+// strings expected by the connector.
 func TestMapObjectState(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -315,6 +326,56 @@ func TestMapObjectState(t *testing.T) {
 		t.Run(fmt.Sprintf("%d", tc.st), func(t *testing.T) {
 			if got := mapObjectState(tc.st); got != tc.want {
 				t.Fatalf("mapObjectState(%v): got %q, want %q", tc.st, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDefaultIsNotExist_FalseForGenericError validates that non-b2 errors are
+// not treated as not-found by the default helper.
+func TestDefaultIsNotExist_FalseForGenericError(t *testing.T) {
+	t.Parallel()
+
+	if got := defaultIsNotExist(errors.New("boom")); got {
+		t.Fatalf("defaultIsNotExist(generic error): got true, want false")
+	}
+}
+
+// TestDefaultB2FacadeFactory_ContextCanceled verifies default factory surfaces
+// errors when client construction context is already canceled.
+func TestDefaultB2FacadeFactory_ContextCanceled(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	f, err := defaultB2FacadeFactory(ctx, "invalid-key-id", "invalid-app-key")
+	if err == nil {
+		t.Fatalf("defaultB2FacadeFactory() expected error with canceled context, got facade=%#v", f)
+	}
+}
+
+// TestBucketTypeFromString verifies bucket type string to blazer enum mapping,
+// including fallback to private for unknown values.
+func TestBucketTypeFromString(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		in   string
+		want b2.BucketType
+	}{
+		{in: "allPublic", want: b2.Public},
+		{in: "snapshot", want: b2.Snapshot},
+		{in: "allPrivate", want: b2.Private},
+		{in: "", want: b2.Private},
+		{in: "unknown", want: b2.Private},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.in, func(t *testing.T) {
+			if got := bucketTypeFromString(tc.in); got != tc.want {
+				t.Fatalf("bucketTypeFromString(%q): got %q, want %q", tc.in, got, tc.want)
 			}
 		})
 	}

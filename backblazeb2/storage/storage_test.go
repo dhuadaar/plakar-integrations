@@ -82,6 +82,8 @@ func nativeTestMAC(seed byte) objects.MAC {
 	return m
 }
 
+// TestNewNativeStore_ErrorsWithoutNetwork validates constructor input parsing
+// and required config field errors without requiring any network calls.
 func TestNewNativeStore_ErrorsWithoutNetwork(t *testing.T) {
 	t.Parallel()
 
@@ -124,6 +126,8 @@ func TestNewNativeStore_ErrorsWithoutNetwork(t *testing.T) {
 	}
 }
 
+// TestNewNativeStore_AcceptsNativeLocationWithoutEndpoint validates native URL
+// parsing mode where host is bucket and path is prefix.
 func TestNewNativeStore_AcceptsNativeLocationWithoutEndpoint(t *testing.T) {
 	t.Parallel()
 
@@ -148,6 +152,8 @@ func TestNewNativeStore_AcceptsNativeLocationWithoutEndpoint(t *testing.T) {
 	}
 }
 
+// TestNewNativeStore_AcceptsLegacyLocationWithEndpoint validates backward
+// compatible endpoint-style URL parsing.
 func TestNewNativeStore_AcceptsLegacyLocationWithEndpoint(t *testing.T) {
 	t.Parallel()
 
@@ -172,6 +178,8 @@ func TestNewNativeStore_AcceptsLegacyLocationWithEndpoint(t *testing.T) {
 	}
 }
 
+// TestNativeCreate verifies create semantics for fresh repositories and the
+// already-initialized guard when CONFIG is present.
 func TestNativeCreate(t *testing.T) {
 	t.Run("creates missing bucket and writes config", func(t *testing.T) {
 		made := false
@@ -235,6 +243,8 @@ func (r *closeReadCloser) Close() error {
 	return nil
 }
 
+// TestNativeOpenAndPing validates CONFIG open/read behavior (including stream
+// close and fs.ErrNotExist mapping) plus ping behavior for missing buckets.
 func TestNativeOpenAndPing(t *testing.T) {
 	t.Run("open reads and closes", func(t *testing.T) {
 		stream := &closeReadCloser{reader: strings.NewReader("config-data")}
@@ -284,6 +294,8 @@ func TestNativeOpenAndPing(t *testing.T) {
 	})
 }
 
+// TestNativeListPutGetDelete validates resource key mapping, MAC decoding,
+// basic CRUD flow, and range forwarding behavior.
 func TestNativeListPutGetDelete(t *testing.T) {
 	t.Run("list packfiles", func(t *testing.T) {
 		mac := nativeTestMAC(0x10)
@@ -377,6 +389,8 @@ func TestNativeListPutGetDelete(t *testing.T) {
 	})
 }
 
+// TestNativeMetadataUtils verifies non-network metadata helpers and static
+// capability reporting (origin/root/type/flags/mode/size).
 func TestNativeMetadataUtils(t *testing.T) {
 	t.Parallel()
 	s := &NativeStore{host: "host.example", bucket: "mybucket", prefixDir: "/repo/"}
@@ -402,6 +416,8 @@ func TestNativeMetadataUtils(t *testing.T) {
 	}
 }
 
+// TestNativeUnsupportedResources ensures all resource-dependent operations
+// return ErrUnsupported for unknown resource kinds.
 func TestNativeUnsupportedResources(t *testing.T) {
 	t.Parallel()
 	s := &NativeStore{client: &mockB2NativeClient{}, bucket: "mybucket", prefixDir: "/repo/"}
